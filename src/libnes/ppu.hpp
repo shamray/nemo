@@ -76,7 +76,15 @@ public:
     constexpr void write(std::uint16_t addr, std::uint8_t value) {
         switch (addr) {
             case 0x2000: {
+                auto nmi_was_enabled = control.raise_vblank_nmi();
                 control.assign(value);
+
+                // Enabling NMI while the vblank flag is already set fires an
+                // immediate NMI on real hardware (edge-triggered on the AND
+                // of the flag and the enable bit)
+                if (not nmi_was_enabled and control.raise_vblank_nmi() and (status & 0x80) != 0) {
+                    nmi_raised = true;
+                }
                 return;
             }
             case 0x2001: {
@@ -173,7 +181,7 @@ private:
 
     [[nodiscard]] constexpr auto read_data() -> std::uint8_t {
         auto a = address;
-        address = ++address % 0x4000;
+        address = static_cast<std::uint16_t>((address + control.vram_address_increment()) % 0x4000);
         auto r = data_read_buffer_;
         auto& b = data_read_buffer_;
 
@@ -379,8 +387,11 @@ private:
         }
     }
     constexpr void vertical_blank_line_old() noexcept {
-
-        if (scan_.cycle() == 0) {
+        // Set once, at the true start of vblank - not on every one of the 20
+        // vblank scanlines, or a $2002 read here can never observe the flag
+        // staying clear (the next scanline forces it back on within the
+        // same vblank period)
+        if (scan_.line() == VISIBLE_SCANLINES + POST_RENDER_SCANLINES and scan_.cycle() == 0) {
             status |= 0x80;
             nmi_raised = control.raise_vblank_nmi();
         }

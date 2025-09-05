@@ -179,6 +179,23 @@ TEST_CASE("PPU") {
         CHECK(read_data(0x1F, 0xFF) == 0xAD);
     }
 
+    SECTION("read data respects the VRAM address increment") {
+        auto cartridge = test_cartridge{};
+        ppu.load_cartridge(&cartridge);
+
+        cartridge.cart_chr[0x0000] = 0x11;
+        cartridge.cart_chr[0x0020] = 0x22;
+        cartridge.cart_chr[0x0040] = 0x33;
+
+        write(0x2000, ppu, 0x04);// increment by 32 per access
+        write(0x2006, ppu, 0x00, 0x00);
+
+        [[maybe_unused]] auto old_read_buf = ppu.read(0x2007);
+        CHECK(ppu.read(0x2007) == 0x11);
+        CHECK(ppu.read(0x2007) == 0x22);
+        CHECK(ppu.read(0x2007) == 0x33);
+    }
+
     SECTION("loading sprites") {
         SECTION("OAMADDR/OAMDATA") {
             write(0x2003, ppu, 1 * sizeof(nes::sprite));
