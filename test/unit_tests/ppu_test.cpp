@@ -223,6 +223,8 @@ TEST_CASE("PPU") {
         auto cartridge = test_cartridge{std::move(chr)};
         ppu.load_cartridge(&cartridge);
 
+        write(0x2001, ppu, 0x1E);// show background and sprites, including leftmost 8 pixels
+
         SECTION("computing nametable addresses") {
 
             SECTION("nametable 0") {
@@ -236,6 +238,40 @@ TEST_CASE("PPU") {
             }
             SECTION("nametable 3") {
                 CHECK(ppu.nametable_address(1, 1) == 0x0C00);
+            }
+        }
+
+        SECTION("mask register") {
+            write(0x2006, ppu, 0x20, 0x00);// Nametable
+            write(0x2007, ppu, 1);// tile with a point at (0,0)
+
+            SECTION("rendering disabled shows the backdrop color") {
+                write(0x2001, ppu, 0x00);
+
+                tick(ppu, screen, 242 * 341);// Wait one frame
+
+                CHECK(screen.pixels.at(nes::point{0, 0}) == BLACK);
+            }
+
+            SECTION("background enabled but leftmost 8 pixels hidden") {
+                write(0x2001, ppu, 0x08);// show background, no leftmost-8 bit
+
+                tick(ppu, screen, 242 * 341);// Wait one frame
+
+                CHECK(screen.pixels.at(nes::point{0, 0}) == BLACK);
+            }
+
+            SECTION("sprites hidden entirely") {
+                auto sprites = std::array<nes::sprite, 64>{};
+                auto mempage = std::bit_cast<std::uint8_t*>(sprites.data());
+                sprites[1] = nes::sprite{.y = 0, .tile = 1, .attr = 0x00, .x = 100};
+                ppu.dma_write(0x0000, [mempage](auto addr) { return mempage[addr]; });
+
+                write(0x2001, ppu, 0x0A);// show background (incl. leftmost), hide sprites
+
+                tick(ppu, screen, 242 * 341);// Wait one frame
+
+                CHECK(screen.pixels.at(nes::point{100, 0}) == BLACK);
             }
         }
 

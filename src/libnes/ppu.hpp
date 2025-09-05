@@ -79,6 +79,10 @@ public:
                 control.assign(value);
                 return;
             }
+            case 0x2001: {
+                mask = value;
+                return;
+            }
             case 0x2003: {
                 write_oama(value);
                 return;
@@ -313,18 +317,24 @@ private:
             auto pixel = read_tile_pixel(control.pattern_table_bg_index(), tile_index, tile_col, tile_row);
             auto palette = read_tile_palette(name_table_, tile_x, tile_y, nametable_addr);
 
-            screen.draw_pixel({x, y}, palette_table_.color_of(pixel, palette));
+            auto background_shown = show_background() and (x >= 8 or show_background_leftmost());
 
-            // Sprite 0 hit
-            auto s = oam_.sprites[0];
-            if (x >= s.x and x < s.x + 8 and y >= s.y and y < s.y + 8 /* and pixel != 0*/) {
-                auto dx = x - s.x;
-                auto dy = y - s.y;
-                auto j = (s.attr & 0x40) ? 7 - dx : dx;
-                auto i = (s.attr & 0x80) ? 7 - dy : dy;
-                auto sprite_pixel = read_tile_pixel(control.pattern_table_fg_index(), s.tile, j, i);
-                if (sprite_pixel != 0) {
-                    status |= 0x40;
+            screen.draw_pixel({x, y}, background_shown
+                ? palette_table_.color_of(pixel, palette)
+                : palette_table_.color_of(0, 0));
+
+            // Sprite 0 hit (requires both background and sprites enabled)
+            if (background_shown and show_sprites()) {
+                auto s = oam_.sprites[0];
+                if (x >= s.x and x < s.x + 8 and y >= s.y and y < s.y + 8 /* and pixel != 0*/) {
+                    auto dx = x - s.x;
+                    auto dy = y - s.y;
+                    auto j = (s.attr & 0x40) ? 7 - dx : dx;
+                    auto i = (s.attr & 0x80) ? 7 - dy : dy;
+                    auto sprite_pixel = read_tile_pixel(control.pattern_table_fg_index(), s.tile, j, i);
+                    if (sprite_pixel != 0) {
+                        status |= 0x40;
+                    }
                 }
             }
         }
@@ -343,7 +353,7 @@ private:
 
     template <screen screen_t>
     constexpr void postrender_scanline_old(screen_t& screen) noexcept {
-        if (scan_.cycle() == 0) {
+        if (scan_.cycle() == 0 and show_sprites()) {
             for (const auto& s: oam_.sprites) {
                 auto palette = static_cast<std::uint8_t>((s.attr & 0x03) + 4);
 
@@ -356,9 +366,10 @@ private:
                         auto dy = (s.attr & 0x80)             // flipped vertically
                             ? (control.sprite_size() == sprite_size::sprite8x8 ? 7 : 15) - i
                             : i;
-                        if (pixel) {
+                        auto screen_x = static_cast<short>(s.x + dx);
+                        if (pixel and (screen_x >= 8 or show_sprites_leftmost())) {
                             screen.draw_pixel(
-                                {static_cast<short>(s.x + dx), static_cast<short>(s.y + dy)},
+                                {screen_x, static_cast<short>(s.y + dy)},
                                 palette_table_.color_of(pixel, palette)
                             );
                         }
@@ -381,6 +392,12 @@ private:
         else
             return std::nullopt;
     };
+
+    // $2001 PPUMASK
+    [[nodiscard]] constexpr auto show_background() const noexcept { return (mask & 0x08) != 0; }
+    [[nodiscard]] constexpr auto show_sprites() const noexcept { return (mask & 0x10) != 0; }
+    [[nodiscard]] constexpr auto show_background_leftmost() const noexcept { return (mask & 0x02) != 0; }
+    [[nodiscard]] constexpr auto show_sprites_leftmost() const noexcept { return (mask & 0x04) != 0; }
 
 private:
     crt_scan scan_{SCANLINE_DOTS, VISIBLE_SCANLINES, POST_RENDER_SCANLINES, VERTICAL_BLANK_SCANLINES};
