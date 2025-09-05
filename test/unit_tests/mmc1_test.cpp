@@ -105,6 +105,21 @@ TEST_CASE("Mapper MMC1") {
             CHECK(cartridge.mirroring() == nes::name_table_mirroring::horizontal);
         }
     }
+
+    SECTION("CHR ROM") {
+        SECTION("At creation both windows show bank 0") {
+            CHECK(cartridge.chr_read(0x0000) == 'x');
+            CHECK(cartridge.chr_read(0x1000) == 'x');
+        }
+
+        SECTION("Bank switching") {
+            write(cartridge, 0xA000, 1);// select bank 1 for the $0000 window
+            write(cartridge, 0xC000, 1);// and for the $1000 window as well
+
+            CHECK(cartridge.chr_read(0x0001) == 'y');
+            CHECK(cartridge.chr_read(0x1002) == 'z');
+        }
+    }
 }
 
 TEST_CASE("Mapper MMC1 with CHR RAM") {
@@ -114,22 +129,22 @@ TEST_CASE("Mapper MMC1 with CHR RAM") {
     auto cartridge = nes::mmc1{prg, no_chr_rom};
 
     SECTION("CHR banks are available") {
-        CHECK(cartridge.chr0()[0] == 0);
-        CHECK(cartridge.chr1()[0] == 0);
+        CHECK(cartridge.chr_read(0x0000) == 0);
+        CHECK(cartridge.chr_read(0x1000) == 0);
     }
 
     SECTION("CHR banks stay available after bank switching") {
         write(cartridge, 0xA000, 1);
         write(cartridge, 0xC000, 1);
 
-        CHECK(cartridge.chr0()[0] == 0);
-        CHECK(cartridge.chr1()[0] == 0);
+        CHECK(cartridge.chr_read(0x0000) == 0);
+        CHECK(cartridge.chr_read(0x1000) == 0);
     }
 
     SECTION("CHR RAM is writable") {
         cartridge.chr_write(0x0000, 0x42);
 
-        CHECK(cartridge.chr0()[0] == 0x42);
+        CHECK(cartridge.chr_read(0x0000) == 0x42);
     }
 
     SECTION("CHR RAM: the two windows can show independent banks") {
@@ -138,8 +153,8 @@ TEST_CASE("Mapper MMC1 with CHR RAM") {
         cartridge.chr_write(0x0000, 0x42);// through chr_ix0_ == 0
         cartridge.chr_write(0x1000, 0x99);// through chr_ix1_ == 1
 
-        CHECK(cartridge.chr0()[0] == 0x42);
-        CHECK(cartridge.chr1()[0] == 0x99);
+        CHECK(cartridge.chr_read(0x0000) == 0x42);
+        CHECK(cartridge.chr_read(0x1000) == 0x99);
     }
 
     SECTION("CHR RAM writes respect bank switching") {
@@ -147,8 +162,10 @@ TEST_CASE("Mapper MMC1 with CHR RAM") {
 
         cartridge.chr_write(0x0000, 0x77);
 
-        CHECK(cartridge.chr0()[0] == 0x77);// bank 1
-        CHECK(cartridge.chr1()[0] == 0x00);// bank 0, untouched
+        CHECK(cartridge.chr_read(0x0000) == 0x77);// bank 1
+
+        write(cartridge, 0xA000, 0);// switch the window back to bank 0
+        CHECK(cartridge.chr_read(0x0000) == 0x00);// untouched
     }
 }
 
@@ -161,5 +178,5 @@ TEST_CASE("Mapper MMC1 with CHR ROM ignores writes") {
 
     cartridge.chr_write(0x0000, 0x99);
 
-    CHECK(cartridge.chr0()[0] == 0x11);// unchanged - real ROM boards ignore writes
+    CHECK(cartridge.chr_read(0x0000) == 0x11);// unchanged - real ROM boards ignore writes
 }

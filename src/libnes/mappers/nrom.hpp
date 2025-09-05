@@ -19,9 +19,12 @@ public:
         , chr1_{chr1}
         , mirroring_{mirroring} {}
 
-    [[nodiscard]] auto chr0() const noexcept -> const membank<4_Kb>& override { return chr0_; }
-    [[nodiscard]] auto chr1() const noexcept -> const membank<4_Kb>& override { return chr1_; }
     [[nodiscard]] auto mirroring() const noexcept -> name_table_mirroring override { return mirroring_; }
+
+    [[nodiscard]] auto chr_read(std::uint16_t addr) const noexcept -> std::uint8_t override {
+        auto& chr = (addr < 0x1000) ? chr0_ : chr1_;
+        return chr[addr % 0x1000];
+    }
 
     auto write([[maybe_unused]] std::uint16_t addr, [[maybe_unused]] std::uint8_t value) -> bool override {
         return false;

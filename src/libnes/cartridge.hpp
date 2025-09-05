@@ -32,15 +32,15 @@ class cartridge
 public:
     virtual ~cartridge() = default;
 
-    [[nodiscard]] virtual auto chr0() const noexcept -> const membank<4_Kb>& = 0;
-    [[nodiscard]] virtual auto chr1() const noexcept -> const membank<4_Kb>& = 0;
     [[nodiscard]] virtual auto mirroring() const noexcept -> name_table_mirroring = 0;
 
     virtual auto write(std::uint16_t addr, std::uint8_t value) -> bool = 0;
     [[nodiscard]] virtual auto read(std::uint16_t addr) -> std::optional<std::uint8_t> = 0;
 
-    // addr is a PPU pattern-table address, 0x0000-0x1FFF. Boards with CHR ROM
-    // ignore this, matching real hardware; boards with CHR RAM store into it.
+    // addr is a PPU pattern-table address, 0x0000-0x1FFF; the mapper resolves
+    // it to a CHR bank. Writes are ignored by boards with CHR ROM, matching
+    // real hardware; boards with CHR RAM store into it.
+    [[nodiscard]] virtual auto chr_read(std::uint16_t addr) const noexcept -> std::uint8_t = 0;
     virtual void chr_write(std::uint16_t addr, std::uint8_t value) noexcept = 0;
 };
 

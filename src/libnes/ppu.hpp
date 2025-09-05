@@ -200,12 +200,7 @@ private:
 
     [[nodiscard]] constexpr auto read_chr(std::uint16_t addr) const -> std::uint8_t {
         assert(addr < 0x2000);
-
-        auto& chr = (addr < 0x1000)
-            ? cartridge_->chr0()
-            : cartridge_->chr1();
-
-        return chr.at(addr % 0x1000);
+        return cartridge_->chr_read(addr);
     }
 
     constexpr void write_chr(std::uint16_t addr, std::uint8_t value) const {

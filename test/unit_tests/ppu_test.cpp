@@ -47,14 +47,8 @@ struct test_cartridge: nes::cartridge {
         : cart_chr{std::move(chr)}
         , cart_mirroring{mirroring} {}
 
-    [[nodiscard]] auto chr0() const noexcept -> const nes::membank<4_Kb>& override {
-        std::copy_n(cart_chr.begin(), 4_Kb, tmp_.begin());
-        return tmp_;
-    }
-
-    [[nodiscard]] auto chr1() const noexcept -> const nes::membank<4_Kb>& override {
-        std::copy_n(std::next(cart_chr.begin(), 4_Kb), 4_Kb, tmp_.begin());
-        return tmp_;
+    [[nodiscard]] auto chr_read(std::uint16_t addr) const noexcept -> std::uint8_t override {
+        return cart_chr[addr % 8_Kb];
     }
 
     [[nodiscard]] auto mirroring() const noexcept -> nes::name_table_mirroring override {
@@ -72,9 +66,6 @@ struct test_cartridge: nes::cartridge {
     [[nodiscard]] auto read([[maybe_unused]] std::uint16_t addr) -> std::optional<std::uint8_t> override {
         return std::nullopt;
     }
-
-private:
-    mutable nes::membank<4_Kb> tmp_;
 };
 
 
