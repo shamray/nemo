@@ -106,3 +106,23 @@ TEST_CASE("Mapper MMC1") {
         }
     }
 }
+
+TEST_CASE("Mapper MMC1 with CHR RAM") {
+    auto prg = std::vector<nes::membank<16_Kb>>{{}, {}};
+    auto no_chr_rom = std::vector<nes::membank<4_Kb>>{};
+
+    auto cartridge = nes::mmc1{prg, no_chr_rom};
+
+    SECTION("CHR banks are available") {
+        CHECK(cartridge.chr0()[0] == 0);
+        CHECK(cartridge.chr1()[0] == 0);
+    }
+
+    SECTION("CHR banks stay available after bank switching") {
+        write(cartridge, 0xA000, 1);
+        write(cartridge, 0xC000, 1);
+
+        CHECK(cartridge.chr0()[0] == 0);
+        CHECK(cartridge.chr1()[0] == 0);
+    }
+}

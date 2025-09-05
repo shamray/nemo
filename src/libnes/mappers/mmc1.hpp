@@ -59,7 +59,13 @@ class mmc1 final: public cartridge
 public:
     mmc1(std::vector<std::array<std::uint8_t, 16_Kb>> prg, std::vector<membank<4_Kb>> chr)
         : prg_{std::move(prg)}
-        , chr_{std::move(chr)} {}
+        , chr_{std::move(chr)} {
+        if (chr_.empty()) {
+            // A board with no CHR ROM carries 8Kb of CHR RAM on the same
+            // bank-select lines; without banks chr0()/chr1() would divide by zero
+            chr_.resize(2);
+        }
+    }
 
     [[nodiscard]] auto chr0() const noexcept -> const membank<4_Kb>& override {
         return chr_[chr_ix0_ % chr_.size()];
