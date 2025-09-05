@@ -60,7 +60,8 @@ public:
     mmc1(std::vector<std::array<std::uint8_t, 16_Kb>> prg, std::vector<membank<4_Kb>> chr)
         : prg_{std::move(prg)}
         , chr_{std::move(chr)} {
-        if (chr_.empty()) {
+        chr_is_ram_ = chr_.empty();
+        if (chr_is_ram_) {
             // A board with no CHR ROM carries 8Kb of CHR RAM on the same
             // bank-select lines; without banks chr0()/chr1() would divide by zero
             chr_.resize(2);
@@ -73,6 +74,14 @@ public:
 
     [[nodiscard]] auto chr1() const noexcept -> const membank<4_Kb>& override {
         return chr_[chr_ix1_ % chr_.size()];
+    }
+
+    void chr_write(std::uint16_t addr, std::uint8_t value) noexcept override {
+        if (not chr_is_ram_)
+            return;// real CHR-ROM boards ignore writes
+
+        auto ix = (addr < 0x1000) ? chr_ix0_ : chr_ix1_;
+        chr_[ix % chr_.size()][addr % 0x1000] = value;
     }
 
     [[nodiscard]] auto mirroring() const noexcept -> name_table_mirroring override {
@@ -157,6 +166,7 @@ public:
 private:
     std::vector<std::array<std::uint8_t, 16_Kb>> prg_;
     std::vector<membank<4_Kb>> chr_;
+    bool chr_is_ram_{false};
 
     mmc1_shift_register shift_register_;
     std::uint8_t control_{0x0C};

@@ -196,6 +196,11 @@ private:
         return chr.at(addr % 0x1000);
     }
 
+    constexpr void write_chr(std::uint16_t addr, std::uint8_t value) const {
+        assert(addr < 0x2000);
+        cartridge_->chr_write(addr, value);
+    }
+
     constexpr void write_oama(std::uint8_t value) { oam_.address = value; }
     void write_oamd(std::uint8_t value) { oam_.write(value); }
 
@@ -226,9 +231,10 @@ private:
             name_table_.write(address & 0xFFF, value);
         } else if (address >= 0x3F00 and address <= 0x3FFF) {
             palette_table_.write(address & 0x001F, value);
-        } else {
-            // ppu chr write
+        } else if (address < 0x2000) {
+            write_chr(address, value);
         }
+        // else: $3001-$3EFF nametable mirror, not yet handled (tracked separately)
 
         address += control.vram_address_increment();
     }

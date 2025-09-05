@@ -38,6 +38,10 @@ public:
 
     virtual auto write(std::uint16_t addr, std::uint8_t value) -> bool = 0;
     [[nodiscard]] virtual auto read(std::uint16_t addr) -> std::optional<std::uint8_t> = 0;
+
+    // addr is a PPU pattern-table address, 0x0000-0x1FFF. Boards with CHR ROM
+    // ignore this, matching real hardware; boards with CHR RAM store into it.
+    virtual void chr_write(std::uint16_t addr, std::uint8_t value) noexcept = 0;
 };
 
 }

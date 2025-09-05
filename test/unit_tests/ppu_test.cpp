@@ -65,6 +65,10 @@ struct test_cartridge: nes::cartridge {
         return false;
     }
 
+    void chr_write(std::uint16_t addr, std::uint8_t value) noexcept override {
+        cart_chr[addr % 8_Kb] = value;
+    }
+
     [[nodiscard]] auto read([[maybe_unused]] std::uint16_t addr) -> std::optional<std::uint8_t> override {
         return std::nullopt;
     }

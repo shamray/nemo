@@ -46,6 +46,9 @@ struct bus_test {
             return false;
         }
 
+        void chr_write([[maybe_unused]] std::uint16_t addr, [[maybe_unused]] std::uint8_t value) noexcept override {
+        }
+
         [[nodiscard]] auto read([[maybe_unused]] std::uint16_t addr) -> std::optional<std::uint8_t> override {
             return std::nullopt;
         }

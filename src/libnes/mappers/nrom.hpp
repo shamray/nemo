@@ -27,6 +27,10 @@ public:
         return false;
     }
 
+    void chr_write([[maybe_unused]] std::uint16_t addr, [[maybe_unused]] std::uint8_t value) noexcept override {
+        // NROM boards ship CHR ROM; real hardware ignores writes to it
+    }
+
     [[nodiscard]] auto read(std::uint16_t addr) -> std::optional<std::uint8_t> override {
         if (addr >= 0x8000 and addr <= 0xBFFF) {
             auto address = addr & 0x3FFFu;

@@ -125,4 +125,41 @@ TEST_CASE("Mapper MMC1 with CHR RAM") {
         CHECK(cartridge.chr0()[0] == 0);
         CHECK(cartridge.chr1()[0] == 0);
     }
+
+    SECTION("CHR RAM is writable") {
+        cartridge.chr_write(0x0000, 0x42);
+
+        CHECK(cartridge.chr0()[0] == 0x42);
+    }
+
+    SECTION("CHR RAM: the two windows can show independent banks") {
+        write(cartridge, 0xC000, 1);// select bank 1 for the $1000 window
+
+        cartridge.chr_write(0x0000, 0x42);// through chr_ix0_ == 0
+        cartridge.chr_write(0x1000, 0x99);// through chr_ix1_ == 1
+
+        CHECK(cartridge.chr0()[0] == 0x42);
+        CHECK(cartridge.chr1()[0] == 0x99);
+    }
+
+    SECTION("CHR RAM writes respect bank switching") {
+        write(cartridge, 0xA000, 1);// select bank 1 for the $0000 window
+
+        cartridge.chr_write(0x0000, 0x77);
+
+        CHECK(cartridge.chr0()[0] == 0x77);// bank 1
+        CHECK(cartridge.chr1()[0] == 0x00);// bank 0, untouched
+    }
+}
+
+TEST_CASE("Mapper MMC1 with CHR ROM ignores writes") {
+    auto prg = std::vector<nes::membank<16_Kb>>{{}, {}};
+    auto chr = std::vector<nes::membank<4_Kb>>{{}, {}};
+    chr[0][0] = 0x11;
+
+    auto cartridge = nes::mmc1{prg, chr};
+
+    cartridge.chr_write(0x0000, 0x99);
+
+    CHECK(cartridge.chr0()[0] == 0x11);// unchanged - real ROM boards ignore writes
 }
