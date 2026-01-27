@@ -269,12 +269,10 @@ private:
         return static_cast<std::uint8_t>(pixel_lo | (pixel_hi << 1));
     }
 
-    [[nodiscard]] constexpr auto read_tile_pixel16(auto tile, auto x, auto y, bool flipped_vertically) {
-        const auto first_bite = (y < 8) == !flipped_vertically;// either top half of the sprite and not flipped
-                                                               // or bottom half and flipped
-        const auto tile_offset = (tile & 0x1) * 0x1000 + (tile & 0xFE) * 0x10 + (first_bite ? 0 : 1);
-        const auto tile_lsb = read_chr(static_cast<std::uint16_t>(tile_offset + y + 0));
-        const auto tile_msb = read_chr(static_cast<std::uint16_t>(tile_offset + y + 8));
+    [[nodiscard]] constexpr auto read_tile_pixel16(auto tile, auto x, auto y) const {
+        const auto tile_offset = (tile & 0x1) * 0x1000 + ((tile & 0xFE) + y / 8) * 0x10;
+        const auto tile_lsb = read_chr(static_cast<std::uint16_t>(tile_offset + y % 8 + 0));
+        const auto tile_msb = read_chr(static_cast<std::uint16_t>(tile_offset + y % 8 + 8));
         const auto pixel_lo = (tile_lsb >> (7 - x)) & 0x01;
         const auto pixel_hi = (tile_msb >> (7 - x)) & 0x01;
         return static_cast<std::uint8_t>(pixel_lo | (pixel_hi << 1));
@@ -322,20 +320,21 @@ private:
 
             auto background_shown = show_background() and (x >= 8 or show_background_leftmost());
 
-            screen.draw_pixel({x, y}, background_shown
-                ? palette_table_.color_of(pixel, palette)
-                : palette_table_.color_of(0, 0));
+            screen.draw_pixel({x, y}, background_shown ? palette_table_.color_of(pixel, palette) : palette_table_.color_of(0, 0));
 
             // Sprite 0 hit (requires both background and sprites enabled).
             // OAM Y is the sprite's top row minus 1 on real hardware, hence + 1.
             if (background_shown and show_sprites()) {
                 auto s = oam_.sprites[0];
-                if (x >= s.x and x < s.x + 8 and y >= s.y + 1 and y < s.y + 1 + 8 /* and pixel != 0*/) {
+                auto height = control.sprite_size() == sprite_size::sprite8x8 ? 8 : 16;
+                if (x >= s.x and x < s.x + 8 and y >= s.y + 1 and y < s.y + 1 + height /* and pixel != 0*/) {
                     auto dx = x - s.x;
                     auto dy = y - (s.y + 1);
                     auto j = (s.attr & 0x40) ? 7 - dx : dx;
-                    auto i = (s.attr & 0x80) ? 7 - dy : dy;
-                    auto sprite_pixel = read_tile_pixel(control.pattern_table_fg_index(), s.tile, j, i);
+                    auto i = (s.attr & 0x80) ? height - 1 - dy : dy;
+                    auto sprite_pixel = control.sprite_size() == sprite_size::sprite8x8
+                        ? read_tile_pixel(control.pattern_table_fg_index(), s.tile, j, i)
+                        : read_tile_pixel16(s.tile, j, i);
                     if (sprite_pixel != 0) {
                         status |= 0x40;
                     }
@@ -369,7 +368,7 @@ private:
                     for (auto j = 0; j < 8; ++j) {
                         auto pixel = control.sprite_size() == sprite_size::sprite8x8
                             ? read_tile_pixel(control.pattern_table_fg_index(), s.tile, j, i)
-                            : read_tile_pixel16(s.tile, j, i, (s.attr & 0x80) != 0);
+                            : read_tile_pixel16(s.tile, j, i);
                         auto dx = (s.attr & 0x40) ? 7 - j : j;// flipped horizontally
                         auto dy = (s.attr & 0x80)             // flipped vertically
                             ? (control.sprite_size() == sprite_size::sprite8x8 ? 7 : 15) - i

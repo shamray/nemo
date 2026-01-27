@@ -226,7 +226,22 @@ TEST_CASE("PPU") {
                            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
 
             99, std::array{0xA0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,// points in top row; colors: 3, 2, 1, 0
-                           0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+                           0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+
+            // 8x16 pair 2/3: top tile point is color 3, bottom tile point is color 1
+            2, std::array{0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,// single point in top left corner
+                          0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+
+            3, std::array{0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,// single point in top left corner, lsb plane only
+                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+
+            // 8x16 pair 6/7: empty top tile, point in the bottom tile
+            7, std::array{0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,// single point in top left corner
+                          0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+
+            // pattern table 1, tile 4 (8x16 pair 4/5 with an odd tile index)
+            256 + 4, std::array{0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,// single point in top left corner
+                                0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
         );
         auto cartridge = test_cartridge{std::move(chr)};
         ppu.load_cartridge(&cartridge);
@@ -493,6 +508,56 @@ TEST_CASE("PPU") {
                 tick(ppu, screen, 2 + 129);// Wait for first pixel to hit sprite 0
 
                 CHECK((ppu.status & 0x40) != 0);
+            }
+
+            SECTION("8x16 sprites") {
+                write(0x2000, ppu, 0x20);// sprite size bit
+
+                SECTION("top half comes from the even tile of the pair") {
+                    sprites[1] = nes::sprite{.y = 0, .tile = 2, .attr = 0x00, .x = 0};
+                    ppu.dma_write(0x0000, [mempage](auto addr) { return mempage[addr]; });
+
+                    tick(ppu, screen, 242 * 341);// Wait one frame
+
+                    CHECK(screen.pixels.at(nes::point{0, 1}) == CYAN);
+                }
+                SECTION("bottom half comes from the odd tile of the pair") {
+                    sprites[1] = nes::sprite{.y = 0, .tile = 2, .attr = 0x00, .x = 0};
+                    ppu.dma_write(0x0000, [mempage](auto addr) { return mempage[addr]; });
+
+                    tick(ppu, screen, 242 * 341);// Wait one frame
+
+                    CHECK(screen.pixels.at(nes::point{0, 9}) == BLUE);
+                }
+                SECTION("odd tile index reads pattern table 1 regardless of PPUCTRL") {
+                    sprites[1] = nes::sprite{.y = 0, .tile = 5, .attr = 0x00, .x = 0};
+                    ppu.dma_write(0x0000, [mempage](auto addr) { return mempage[addr]; });
+
+                    tick(ppu, screen, 242 * 341);// Wait one frame
+
+                    CHECK(screen.pixels.at(nes::point{0, 1}) == CYAN);
+                }
+                SECTION("flip vertically reverses rows across both halves") {
+                    sprites[1] = nes::sprite{.y = 0, .tile = 2, .attr = 0x80, .x = 0};
+                    ppu.dma_write(0x0000, [mempage](auto addr) { return mempage[addr]; });
+
+                    tick(ppu, screen, 242 * 341);// Wait one frame
+
+                    CHECK(screen.pixels.at(nes::point{0, 16}) == CYAN);// pattern row 0 (top tile)
+                    CHECK(screen.pixels.at(nes::point{0, 8}) == BLUE);// pattern row 8 (bottom tile)
+                }
+                SECTION("sprite 0 hit on the bottom half") {
+                    sprites[0] = nes::sprite{.y = 0, .tile = 6, .attr = 0x00, .x = 128};// pair 6/7, top tile empty
+                    ppu.dma_write(0x0000, [mempage](auto addr) { return mempage[addr]; });
+
+                    REQUIRE((ppu.status & 0x40) == 0);
+                    tick(ppu, screen, 1 * 341);// Wait prerender scanline
+                    tick(ppu, screen, 9 * 341);// Scanlines 0-8: sprite rows 0-7 (empty top tile)
+                    REQUIRE((ppu.status & 0x40) == 0);
+                    tick(ppu, screen, 2 + 129);// Scanline 9, sprite row 8: first pixel of the bottom tile
+
+                    CHECK((ppu.status & 0x40) != 0);
+                }
             }
         }
     }
