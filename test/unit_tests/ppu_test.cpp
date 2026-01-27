@@ -124,7 +124,7 @@ TEST_CASE("PPU") {
 
     SECTION("start of the frame") {
         ppu.status |= 0x40;
-        ppu.tick_old(screen);
+        tick(ppu, screen, 2);// flags clear at dot 1 of the pre-render line, not dot 0
 
         CHECK((ppu.status & 0x40) == 0);
     }
@@ -281,12 +281,54 @@ TEST_CASE("PPU") {
 
                 CHECK(screen.pixels.at(nes::point{100, 0}) == BLACK);
             }
+
+            // With rendering off, v is a plain VRAM pointer; the dot-257 and
+            // pre-render t->v copies must not run, or a boot-time nametable
+            // clear spanning many scanlines keeps snapping back and never
+            // advances (SMB/TMNT/Chip 'n Dale garbage tiles regression).
+            SECTION("$2007 streams with rendering disabled cross scanlines undisturbed (+1 mode, dot-257 X copy)") {
+                write(0x2001, ppu, 0x00);
+                write(0x2006, ppu, 0x20, 0x00);
+
+                for (auto i = 0; i < 8; ++i) {
+                    write(0x2007, ppu, 0x24);
+                    tick(ppu, screen, 341);// cross a dot-257 reload point
+                }
+
+                write(0x2006, ppu, 0x20, 0x00);
+                [[maybe_unused]] auto prime_read_buffer = ppu.read(0x2007);
+                for (auto i = 0; i < 8; ++i) {
+                    CHECK(ppu.read(0x2007) == 0x24);
+                }
+            }
+
+            SECTION("$2007 streams with rendering disabled cross the pre-render line undisturbed (+32 mode, Y copy)") {
+                write(0x2001, ppu, 0x00);
+                write(0x2000, ppu, 0x04);// +32 per access: each write moves one row down
+                write(0x2006, ppu, 0x20, 0x00);
+
+                // The scan starts on the pre-render line, so the first
+                // tick crosses its 280-304 vertical-copy window while v's
+                // coarse Y is already ahead of t's.
+                for (auto i = 0; i < 8; ++i) {
+                    write(0x2007, ppu, 0x24);
+                    tick(ppu, screen, 341);
+                }
+
+                write(0x2006, ppu, 0x20, 0x00);
+                [[maybe_unused]] auto prime_read_buffer = ppu.read(0x2007);
+                for (auto i = 0; i < 8; ++i) {
+                    CHECK(ppu.read(0x2007) == 0x24);
+                }
+            }
         }
 
         SECTION("rendering background") {
             SECTION("point at (0,0)") {
                 write(0x2006, ppu, 0x20, 0x00);// Nametable
                 write(0x2007, ppu, 1);
+                write(0x2000, ppu, 0x00);// reset scroll/nametable polluted by the $2006 writes above
+                write(0x2005, ppu, 0, 0);
 
                 tick(ppu, screen, 242 * 341);// Wait one frame
 
@@ -303,6 +345,8 @@ TEST_CASE("PPU") {
             SECTION("point at (7,1)") {
                 write(0x2006, ppu, 0x20, 0x00);// Nametable
                 write(0x2007, ppu, 42);
+                write(0x2000, ppu, 0x00);// reset scroll/nametable polluted by the $2006 writes above
+                write(0x2005, ppu, 0, 0);
 
                 tick(ppu, screen, 242 * 341);// Wait one frame
 
@@ -312,6 +356,8 @@ TEST_CASE("PPU") {
             SECTION("point at (15,1)") {
                 write(0x2006, ppu, 0x20, 0x00);// Nametable
                 write(0x2007, ppu, 0, 42);
+                write(0x2000, ppu, 0x00);// reset scroll/nametable polluted by the $2006 writes above
+                write(0x2005, ppu, 0, 0);
 
                 tick(ppu, screen, 242 * 341);// Wait one frame
 
@@ -321,6 +367,8 @@ TEST_CASE("PPU") {
             SECTION("4 palette colors") {
                 write(0x2006, ppu, 0x20, 0x00);// Nametable
                 write(0x2007, ppu, 99);
+                write(0x2000, ppu, 0x00);// reset scroll/nametable polluted by the $2006 writes above
+                write(0x2005, ppu, 0, 0);
 
                 tick(ppu, screen, 242 * 341);// Wait one frame
 
@@ -335,6 +383,8 @@ TEST_CASE("PPU") {
                 write(0x2007, ppu, 0, 42);
                 write(0x2006, ppu, 0x24, 0x00);// Nametable
                 write(0x2007, ppu, 42);
+                write(0x2000, ppu, 0x00);// reset scroll/nametable polluted by the $2006 writes above
+                write(0x2005, ppu, 0, 0);
 
                 SECTION("1 pixel") {
                     write(0x2005, ppu, 1, 0);
@@ -372,6 +422,8 @@ TEST_CASE("PPU") {
                 write(0x2007, ppu, 0, 42);
                 write(0x2006, ppu, 0x24, 0x00);// Nametable
                 write(0x2007, ppu, 42);
+                write(0x2000, ppu, 0x00);// reset scroll/nametable polluted by the $2006 writes above
+                write(0x2005, ppu, 0, 0);
 
                 SECTION("1 pixel") {
                     write(0x2005, ppu, 0, 1);
@@ -386,13 +438,14 @@ TEST_CASE("PPU") {
             auto sprites = std::array<nes::sprite, 64>{};
             auto mempage = std::bit_cast<std::uint8_t*>(sprites.data());
 
+            // Sprites appear one scanline below their OAM Y (hardware quirk)
             SECTION("single point, sprite at (0, 0)") {
                 sprites[1] = nes::sprite{.y = 0, .tile = 1, .attr = 0x00, .x = 0};
                 ppu.dma_write(0x0000, [mempage](auto addr) { return mempage[addr]; });
 
                 tick(ppu, screen, 242 * 341);// Wait one frame
 
-                CHECK(screen.pixels.at(nes::point{0, 0}) == CYAN);
+                CHECK(screen.pixels.at(nes::point{0, 1}) == CYAN);
             }
             SECTION("single point, sprite at (3, 2)") {
                 sprites[1] = nes::sprite{.y = 2, .tile = 1, .attr = 0x00, .x = 3};
@@ -400,7 +453,7 @@ TEST_CASE("PPU") {
 
                 tick(ppu, screen, 242 * 341);// Wait one frame
 
-                CHECK(screen.pixels.at(nes::point{3, 2}) == CYAN);
+                CHECK(screen.pixels.at(nes::point{3, 3}) == CYAN);
             }
             SECTION("single point, sprite palette #1") {
                 sprites[1] = nes::sprite{.y = 0, .tile = 1, .attr = 0x01, .x = 0};
@@ -408,7 +461,7 @@ TEST_CASE("PPU") {
 
                 tick(ppu, screen, 242 * 341);// Wait one frame
 
-                CHECK(screen.pixels.at(nes::point{0, 0}) == WHITE);
+                CHECK(screen.pixels.at(nes::point{0, 1}) == WHITE);
             }
             SECTION("single point, flip vertically") {
                 sprites[1] = nes::sprite{.y = 0, .tile = 1, .attr = 0x80, .x = 0};
@@ -416,7 +469,7 @@ TEST_CASE("PPU") {
 
                 tick(ppu, screen, 242 * 341);// Wait one frame
 
-                CHECK(screen.pixels.at(nes::point{0, 7}) == CYAN);
+                CHECK(screen.pixels.at(nes::point{0, 8}) == CYAN);
             }
             SECTION("single point, flip horizontally") {
                 sprites[1] = nes::sprite{.y = 0, .tile = 1, .attr = 0x40, .x = 0};
@@ -424,7 +477,7 @@ TEST_CASE("PPU") {
 
                 tick(ppu, screen, 242 * 341);// Wait one frame
 
-                CHECK(screen.pixels.at(nes::point{7, 0}) == CYAN);
+                CHECK(screen.pixels.at(nes::point{7, 1}) == CYAN);
             }
 
             SECTION("sprite 0 hit") {
@@ -436,6 +489,7 @@ TEST_CASE("PPU") {
 
                 REQUIRE((ppu.status & 0x40) == 0);
                 tick(ppu, screen, 1 * 341);// Wait prerender scanline
+                tick(ppu, screen, 1 * 341);// OAM y=0 renders on scanline 1, not 0 (hardware y+1 quirk)
                 tick(ppu, screen, 2 + 129);// Wait for first pixel to hit sprite 0
 
                 CHECK((ppu.status & 0x40) != 0);

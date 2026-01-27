@@ -4,6 +4,7 @@
 #include <libnes/ppu_name_table.hpp>
 #include <libnes/ppu_object_attribute_memory.hpp>
 #include <libnes/ppu_palette_table.hpp>
+#include <libnes/ppu_scroll.hpp>
 
 #include <libnes/color.hpp>
 #include <libnes/screen.hpp>
@@ -36,22 +37,10 @@ public:
     std::uint8_t status{0};
     std::uint8_t mask{0};
 
-    std::uint16_t vram_addr;
-    std::uint16_t temp_addr;
-    std::uint8_t fine_x;
-
-    int scroll_latch{0};
-    std::uint8_t scroll_x{0};
-    std::uint8_t scroll_y{0};
-    std::uint8_t scroll_x_buffer{0};
-    std::uint8_t scroll_y_buffer{0};
+    scroll_registers scroll_;
 
     bool nmi_raised{false};
     bool nmi_seen{false};
-
-    int address_latch{0};
-    std::uint16_t address;
-    std::uint8_t data_buffer;
 
     template <screen screen_t>
     constexpr void tick_old(screen_t& screen);
@@ -78,6 +67,7 @@ public:
             case 0x2000: {
                 auto nmi_was_enabled = control.raise_vblank_nmi();
                 control.assign(value);
+                scroll_.write_control(value);
 
                 // Enabling NMI while the vblank flag is already set fires an
                 // immediate NMI on real hardware (edge-triggered on the AND
@@ -129,10 +119,8 @@ public:
     }
 
     [[nodiscard]] constexpr auto tile_x_scrolled(short x) const {
-        assert(nametable_index_x_ == 0 or nametable_index_x_ == 1);
-
-        auto tile_x = (x + scroll_x) / 8;
-        auto nametable_index_x = nametable_index_x_;
+        auto tile_x = (x + active_scroll_x()) / 8;
+        auto nametable_index_x = render_nametable_x_;
 
         if (tile_x >= 32) {// wrap nametable while scrolling horizontally
             tile_x %= 32;
@@ -142,10 +130,8 @@ public:
     }
 
     [[nodiscard]] constexpr auto tile_y_scrolled(short y) const {
-        assert(nametable_index_y_ == 0 or nametable_index_y_ == 1);
-
-        auto tile_y = (y + scroll_y) / 8;
-        auto nametable_index_y = nametable_index_y_;
+        auto tile_y = (y + active_scroll_y()) / 8;
+        auto nametable_index_y = render_nametable_y_;
 
         if (tile_y >= 30) {// wrap nametable while scrolling vertically
             tile_y -= 30;
@@ -172,24 +158,51 @@ public:
     }
 
 private:
+    // Scroll as the OLD renderer consumes it, latched from `staged` at the
+    // hardware copy points (dot 257 for X, pre-render 280-304 for Y). The
+    // old path models scroll as absolute per-frame offsets, so it must not
+    // observe `current` moving mid-frame under $2006/$2007 traffic -- that
+    // register doubles as the live VRAM pointer. Fine X is the exception:
+    // hardware applies it at the pixel mux immediately (finding #40).
+    [[nodiscard]] constexpr auto active_scroll_x() const noexcept -> int {
+        return render_scroll_x_ + scroll_.fine_x;
+    }
+    [[nodiscard]] constexpr auto active_scroll_y() const noexcept -> int {
+        return render_scroll_y_;
+    }
+
+    constexpr void latch_render_scroll_x() noexcept {
+        scroll_.current.reload_column_from(scroll_.staged);
+        render_scroll_x_ = scroll_.staged.coarse_x() * 8;
+        render_nametable_x_ = scroll_.staged.nametable_x();
+    }
+
+    constexpr void latch_render_scroll_y() noexcept {
+        scroll_.current.reload_row_from(scroll_.staged);
+        render_scroll_y_ = scroll_.staged.coarse_y() * 8 + scroll_.staged.fine_y();
+        render_nametable_y_ = scroll_.staged.nametable_y();
+    }
+
     [[nodiscard]] constexpr auto read_stat() -> std::uint8_t {
         auto requested_status = static_cast<std::uint8_t>(status & 0xe0);
         status &= 0x60;// reset vblank
-        address_latch = 0;
+        scroll_.reset_write_toggle();
         return requested_status;
     }
 
     [[nodiscard]] constexpr auto read_data() -> std::uint8_t {
-        auto a = address;
-        address = static_cast<std::uint16_t>((address + control.vram_address_increment()) % 0x4000);
+        // v is 15 bits, but only 14 reach the bus -- bit 14 (fine Y's top
+        // bit) is not wired out, so a vertically-scrolled v must not leak
+        // into the address decode below.
+        auto a = static_cast<std::uint16_t>(scroll_.current.raw() & 0x3FFF);
+        scroll_.current.advance(control.vram_address_increment());
         auto r = data_read_buffer_;
         auto& b = data_read_buffer_;
 
-        if (a >= 0x2000 and a <= 0x2FFF) {
+        if (a >= 0x2000 and a <= 0x3EFF) {
+            // $3000-$3EFF mirrors $2000-$2EFF
             b = name_table_.read(a & 0xFFF);
-        } else if (a >= 0x3000 and a <= 0x3EFF) {
-            throw std::range_error("not implemented");
-        } else if (a >= 0x3F00 and a <= 0x3FFF) {
+        } else if (a >= 0x3F00) {
             r = b = palette_table_.read(a & 0x001F);
         } else {
             b = read_chr(a);
@@ -211,46 +224,33 @@ private:
     constexpr void write_oama(std::uint8_t value) { oam_.address = value; }
     void write_oamd(std::uint8_t value) { oam_.write(value); }
 
-    constexpr void write_scrl(std::uint8_t value) {
-        if (scroll_latch == 0) {
-            scroll_x_buffer = value;
-            scroll_latch = 1;
-        } else {
-            scroll_y_buffer = value;
-            scroll_latch = 0;
-        }
-    }
+    constexpr void write_scrl(std::uint8_t value) { scroll_.write_scroll(value); }
 
     constexpr void write_addr(std::uint8_t value) {
-        if (address_latch == 0) {
-            address = (address & 0x00FF) | (value << 8);
-            address_latch = 1;
+        if (not scroll_.second_write) {
+            scroll_.write_address_hi(value);
         } else {
-            address = (address & 0xFF00) | (value << 0);
-            address_latch = 0;
-
-            address &= 0x3FFF;
+            scroll_.write_address_lo(value);
         }
     }
 
     constexpr void write_data(std::uint8_t value) {
-        if (address >= 0x2000 and address <= 0x3000) {
+        // Same 14-bit bus mask as read_data
+        auto address = static_cast<std::uint16_t>(scroll_.current.raw() & 0x3FFF);
+        if (address >= 0x2000 and address <= 0x3EFF) {
+            // $3000-$3EFF mirrors $2000-$2EFF
             name_table_.write(address & 0xFFF, value);
-        } else if (address >= 0x3F00 and address <= 0x3FFF) {
+        } else if (address >= 0x3F00) {
             palette_table_.write(address & 0x001F, value);
-        } else if (address < 0x2000) {
+        } else {
             write_chr(address, value);
         }
-        // else: $3001-$3EFF nametable mirror, not yet handled (tracked separately)
 
-        address += control.vram_address_increment();
+        scroll_.current.advance(control.vram_address_increment());
     }
 
     constexpr void prerender_scanline_old() noexcept;
     constexpr void prerender_scanline() noexcept;
-
-    std::uint8_t nametable_index_x_{0};
-    std::uint8_t nametable_index_y_{0};
 
     [[nodiscard]] constexpr static auto nametable_tile_offset(auto tile_x, auto tile_y, int nametable_index) {
         return static_cast<std::uint16_t>((tile_y * 32 + tile_x) | nametable_index);
@@ -311,8 +311,8 @@ private:
             auto [nametable_index_x, tile_x] = tile_x_scrolled(x);
             auto [nametable_index_y, tile_y] = tile_y_scrolled(y);
 
-            auto tile_row = (y + scroll_y) % 8;
-            auto tile_col = (x + scroll_x) % 8;
+            auto tile_row = (y + active_scroll_y()) % 8;
+            auto tile_col = (x + active_scroll_x()) % 8;
 
             auto nametable_addr = nametable_address(nametable_index_x, nametable_index_y);
 
@@ -326,12 +326,13 @@ private:
                 ? palette_table_.color_of(pixel, palette)
                 : palette_table_.color_of(0, 0));
 
-            // Sprite 0 hit (requires both background and sprites enabled)
+            // Sprite 0 hit (requires both background and sprites enabled).
+            // OAM Y is the sprite's top row minus 1 on real hardware, hence + 1.
             if (background_shown and show_sprites()) {
                 auto s = oam_.sprites[0];
-                if (x >= s.x and x < s.x + 8 and y >= s.y and y < s.y + 8 /* and pixel != 0*/) {
+                if (x >= s.x and x < s.x + 8 and y >= s.y + 1 and y < s.y + 1 + 8 /* and pixel != 0*/) {
                     auto dx = x - s.x;
-                    auto dy = y - s.y;
+                    auto dy = y - (s.y + 1);
                     auto j = (s.attr & 0x40) ? 7 - dx : dx;
                     auto i = (s.attr & 0x80) ? 7 - dy : dy;
                     auto sprite_pixel = read_tile_pixel(control.pattern_table_fg_index(), s.tile, j, i);
@@ -342,9 +343,13 @@ private:
             }
         }
 
-        if (scan_.cycle() == 257) {
-            scroll_x = scroll_x_buffer;
-            nametable_index_x_ = control.nametable_index_x();
+        // "At dot 257 of each scanline... horizontal bits are copied" -- the
+        // pre-render line does the same copy, in prerender_scanline_old.
+        // Hardware only performs the copy while rendering is enabled; with
+        // it disabled, v is a plain VRAM pointer that games stream through
+        // via $2007 (boot-time nametable clears!) and must not be touched.
+        if (scan_.cycle() == 257 and rendering_enabled()) {
+            latch_render_scroll_x();
         }
     }
 
@@ -371,8 +376,10 @@ private:
                             : i;
                         auto screen_x = static_cast<short>(s.x + dx);
                         if (pixel and (screen_x >= 8 or show_sprites_leftmost())) {
+                            // sprites appear one scanline below OAM Y, same
+                            // as the sprite-0 hit check
                             screen.draw_pixel(
-                                {screen_x, static_cast<short>(s.y + dy)},
+                                {screen_x, static_cast<short>(s.y + 1 + dy)},
                                 palette_table_.color_of(pixel, palette)
                             );
                         }
@@ -385,8 +392,9 @@ private:
         // Set once, at the true start of vblank - not on every one of the 20
         // vblank scanlines, or a $2002 read here can never observe the flag
         // staying clear (the next scanline forces it back on within the
-        // same vblank period)
-        if (scan_.line() == VISIBLE_SCANLINES + POST_RENDER_SCANLINES and scan_.cycle() == 0) {
+        // same vblank period). Real hardware sets it at dot 1 of this line,
+        // not dot 0.
+        if (scan_.line() == VISIBLE_SCANLINES + POST_RENDER_SCANLINES and scan_.cycle() == 1) {
             status |= 0x80;
             nmi_raised = control.raise_vblank_nmi();
         }
@@ -402,10 +410,17 @@ private:
     // $2001 PPUMASK
     [[nodiscard]] constexpr auto show_background() const noexcept -> bool { return (mask & 0x08) != 0; }
     [[nodiscard]] constexpr auto show_sprites() const noexcept -> bool { return (mask & 0x10) != 0; }
+    [[nodiscard]] constexpr auto rendering_enabled() const noexcept -> bool { return show_background() or show_sprites(); }
     [[nodiscard]] constexpr auto show_background_leftmost() const noexcept -> bool { return (mask & 0x02) != 0; }
     [[nodiscard]] constexpr auto show_sprites_leftmost() const noexcept -> bool { return (mask & 0x04) != 0; }
 
 private:
+    // The old renderer's latched scroll view -- see active_scroll_x/y
+    int render_scroll_x_{0};
+    int render_scroll_y_{0};
+    int render_nametable_x_{0};
+    int render_nametable_y_{0};
+
     crt_scan scan_{SCANLINE_DOTS, VISIBLE_SCANLINES, POST_RENDER_SCANLINES, VERTICAL_BLANK_SCANLINES};
 
     nes::name_table name_table_{[this]() constexpr { return mirroring(); }};
@@ -414,8 +429,6 @@ private:
 
     cartridge* cartridge_{nullptr};
     std::uint8_t data_read_buffer_;
-
-    std::uint16_t addr_;
 };
 
 template <screen screen_t>
@@ -471,15 +484,26 @@ inline auto ppu::display_pattern_table(auto i, auto palette) const -> std::array
 }
 
 constexpr void ppu::prerender_scanline_old() noexcept {
-    if (scan_.cycle() == 0) {
+    // Real hardware clears vblank/sprite-0/overflow at dot 1 of the
+    // pre-render line, not dot 0 -- matches the dot-1 set in
+    // vertical_blank_line_old, so the flag's held duration is unchanged.
+    if (scan_.cycle() == 1) {
         status = 0x00;
         control.smb_hotfix();
         nmi_raised = false;
         nmi_seen = false;
     }
-    if (scan_.cycle() >= 280) {
-        scroll_y = scroll_y_buffer;
-        nametable_index_y_ = control.nametable_index_y();
+    // The pre-render line runs the same dot-257 horizontal copy every
+    // rendering line does -- this is what makes scanline 0 of the next
+    // frame start from the software-staged scroll position instead of
+    // whatever was left over from the previous frame's playfield. Both
+    // copies only happen while rendering is enabled (see the dot-257 note
+    // in visible_scanline_old).
+    if (scan_.cycle() == 257 and rendering_enabled()) {
+        latch_render_scroll_x();
+    }
+    if (scan_.cycle() >= 280 and scan_.cycle() <= 304 and rendering_enabled()) {
+        latch_render_scroll_y();
     }
 }
 

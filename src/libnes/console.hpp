@@ -60,8 +60,9 @@ struct console_bus {
         if (addr < 0x2000) {
             mem[addr % 0x0800] = value;
 
-        } else if (addr >= 0x2000 and addr < 0x2008) {
-            ppu().write(addr, value);
+        } else if (addr >= 0x2000 and addr < 0x4000) {
+            // $2008-$3FFF mirrors the eight PPU registers at $2000-$2007
+            ppu().write(static_cast<std::uint16_t>(0x2000 | (addr & 0x0007)), value);
 
         } else if (addr == 0x4014) {
             ppu().dma_write(value << 8U, [this](auto addr) { return read(addr); });
@@ -79,8 +80,12 @@ struct console_bus {
             return mem[addr & 0x07FF];
         }
 
-        if (auto r = ppu().read(addr); r.has_value())
-            return r.value();
+        if (addr < 0x4000) {
+            // $2008-$3FFF mirrors the eight PPU registers at $2000-$2007
+            if (auto r = ppu().read(static_cast<std::uint16_t>(0x2000 | (addr & 0x0007))); r.has_value())
+                return r.value();
+            return 0;
+        }
 
         if (addr == 0x4016) {
             auto r = (j1.snapshot & 0x80) ? std::uint8_t{1} : std::uint8_t{0};
@@ -145,6 +150,13 @@ public:
 
     void controller_input(std::uint8_t keys) {
         bus_.j1.keys = keys;
+    }
+
+    // Debug/test-only: read a byte off the CPU-visible bus without advancing
+    // emulation. Used to inspect cartridge PRG-RAM (e.g. blargg test ROMs'
+    // $6000/$6004 status-and-text convention).
+    [[nodiscard]] auto peek(std::uint16_t addr) -> std::uint8_t {
+        return bus_.read(addr);
     }
 
 private:

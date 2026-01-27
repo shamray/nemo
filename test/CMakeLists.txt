@@ -9,6 +9,7 @@ add_executable(unit_tests
     unit_tests/ppu_oam_test.cpp
     unit_tests/bus_test.cpp
     unit_tests/ppu_registers_test.cpp
+    unit_tests/ppu_scroll_test.cpp
 )
 
 target_link_libraries(unit_tests
@@ -20,6 +21,7 @@ catch_discover_tests(unit_tests)
 
 add_executable(integration_tests
     integration_tests/nestest.cpp
+    integration_tests/ppu_vbl_nmi.cpp
 )
 
 target_link_libraries(integration_tests

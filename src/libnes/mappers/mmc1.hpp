@@ -84,6 +84,11 @@ public:
     }
 
     auto write(std::uint16_t addr, std::uint8_t value) -> bool override {
+        if (addr >= 0x6000 and addr < 0x8000) {
+            prg_ram_[addr - 0x6000] = value;
+            return true;
+        }
+
         if (addr < 0x8000)
             return false;
 
@@ -107,6 +112,10 @@ public:
     }
 
     [[nodiscard]] auto read(std::uint16_t addr) -> std::optional<std::uint8_t> override {
+        if (addr >= 0x6000 and addr < 0x8000) {
+            return prg_ram_[addr - 0x6000];
+        }
+
         auto prg_mode = (control_ & 0b01100) >> 2;
 
         if (prg_mode == 0 or prg_mode == 1) {
@@ -168,6 +177,7 @@ private:
     std::vector<std::array<std::uint8_t, 16_Kb>> prg_;
     std::vector<membank<4_Kb>> chr_;
     bool chr_is_ram_{false};
+    std::array<std::uint8_t, 8_Kb> prg_ram_{};
 
     mmc1_shift_register shift_register_;
     std::uint8_t control_{0x0C};
