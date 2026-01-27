@@ -13,7 +13,7 @@ namespace nes
 template <typename T>
 concept PPU = requires(T t, std::uint16_t address, std::uint8_t value, nes::cartridge* rom, nes::name_table_mirroring m) {
     { t.read(address) } -> std::same_as<std::optional<std::uint8_t>>;
-    { t.dma_write(address, std::invocable<std::uint16_t> ) };
+    { t.dma_write(address, std::invocable<std::uint16_t>) };
     { t.load_cartridge(rom) };
     { t.eject_cartridge() };
 };
@@ -112,6 +112,21 @@ private:
     std::reference_wrapper<P> ppu_;
 };
 
+class cpu_clock
+{
+public:
+    auto is_cpu_cycle() {
+        return counter_ == 0;
+    }
+
+    void tick() {
+        counter_ = (counter_ + 1) % 3;
+    }
+
+private:
+    int counter_{0};
+};
+
 class console
 {
 public:
@@ -125,18 +140,16 @@ public:
 
     template <screen screen_t>
     void render_frame(screen_t& screen) {
-        auto count = 0;
-        for (;; ++count) {
-            cpu_.tick();
+        // The frame is 89342 dots, which is not divisible by 3, so the CPU/PPU
+        // phase must carry across frame boundaries
+        for (;;) {
+            if (cpu_clock_.is_cpu_cycle())
+                cpu_.tick();
 
-            ppu_.tick_old(screen);
-            if (ppu_.is_frame_ready()) break;
-            ppu_.tick_old(screen);
-            if (ppu_.is_frame_ready()) break;
+            cpu_clock_.tick();
             ppu_.tick_old(screen);
             if (ppu_.is_frame_ready()) break;
         }
-        assert(count == 29780 || count == 29781);
     }
 
     template <screen screen_t>
@@ -164,6 +177,7 @@ private:
     ppu ppu_{nes::DEFAULT_COLORS};
     bus bus_{ppu_};
     cpu cpu_{bus_};
+    cpu_clock cpu_clock_;// dot position within the current CPU cycle, carried across frames
 };
 
 }// namespace nes
