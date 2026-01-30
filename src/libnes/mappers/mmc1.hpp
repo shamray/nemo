@@ -168,9 +168,16 @@ public:
     }
 
 private:
-    // The $0000 and $1000 pattern-table windows each have their own bank select
+    // In 4Kb mode (control bit 4 set) the $0000 and $1000 pattern-table
+    // windows each have their own bank select; in 8Kb mode a single select
+    // (low bit ignored) maps a bank pair across both windows
     [[nodiscard]] auto chr_bank(std::uint16_t addr) const noexcept -> std::size_t {
-        auto ix = (addr < 0x1000) ? chr_ix0_ : chr_ix1_;
+        auto window = (addr < 0x1000) ? 0u : 1u;
+
+        if ((control_ & 0b10000) == 0)
+            return ((chr_ix0_ & ~1u) | window) % chr_.size();
+
+        auto ix = (window == 0) ? chr_ix0_ : chr_ix1_;
         return ix % chr_.size();
     }
 

@@ -107,14 +107,22 @@ TEST_CASE("Mapper MMC1") {
     }
 
     SECTION("CHR ROM") {
-        SECTION("At creation both windows show bank 0") {
+        SECTION("At creation (8Kb mode) the windows show the first bank pair") {
             CHECK(cartridge.chr_read(0x0000) == 'x');
-            CHECK(cartridge.chr_read(0x1000) == 'x');
+            CHECK(cartridge.chr_read(0x1001) == 'y');
         }
 
-        SECTION("Bank switching") {
-            write(cartridge, 0xA000, 1);// select bank 1 for the $0000 window
-            write(cartridge, 0xC000, 1);// and for the $1000 window as well
+        SECTION("8Kb mode ignores the low bit of the bank select") {
+            write(cartridge, 0xA000, 1);// still the 0-1 pair
+
+            CHECK(cartridge.chr_read(0x0000) == 'x');
+            CHECK(cartridge.chr_read(0x1001) == 'y');
+        }
+
+        SECTION("Bank switching in 4Kb mode") {
+            write(cartridge, 0x8000, 0b10000);// 4Kb CHR mode
+            write(cartridge, 0xA000, 1);      // select bank 1 for the $0000 window
+            write(cartridge, 0xC000, 1);      // and for the $1000 window as well
 
             CHECK(cartridge.chr_read(0x0001) == 'y');
             CHECK(cartridge.chr_read(0x1002) == 'z');
@@ -147,8 +155,30 @@ TEST_CASE("Mapper MMC1 with CHR RAM") {
         CHECK(cartridge.chr_read(0x0000) == 0x42);
     }
 
-    SECTION("CHR RAM: the two windows can show independent banks") {
-        write(cartridge, 0xC000, 1);// select bank 1 for the $1000 window
+    SECTION("8Kb mode: the windows map both halves of the 8Kb RAM") {
+        // The Legend of Zelda (SNROM) stays in 8Kb CHR mode (control bit 4
+        // clear, the power-on state) and uploads sprites to one pattern
+        // table and background to the other; the windows must not alias
+        cartridge.chr_write(0x0000, 0x42);
+        cartridge.chr_write(0x1000, 0x99);
+
+        CHECK(cartridge.chr_read(0x0000) == 0x42);
+        CHECK(cartridge.chr_read(0x1000) == 0x99);
+    }
+
+    SECTION("8Kb mode: the second bank-select register is ignored") {
+        write(cartridge, 0xC000, 1);// would alias both windows onto bank 1 if honored
+
+        cartridge.chr_write(0x0000, 0x42);
+        cartridge.chr_write(0x1000, 0x99);
+
+        CHECK(cartridge.chr_read(0x0000) == 0x42);
+        CHECK(cartridge.chr_read(0x1000) == 0x99);
+    }
+
+    SECTION("CHR RAM: in 4Kb mode the two windows can show independent banks") {
+        write(cartridge, 0x8000, 0b10000);// 4Kb CHR mode
+        write(cartridge, 0xC000, 1);      // select bank 1 for the $1000 window
 
         cartridge.chr_write(0x0000, 0x42);// through chr_ix0_ == 0
         cartridge.chr_write(0x1000, 0x99);// through chr_ix1_ == 1
@@ -158,7 +188,8 @@ TEST_CASE("Mapper MMC1 with CHR RAM") {
     }
 
     SECTION("CHR RAM writes respect bank switching") {
-        write(cartridge, 0xA000, 1);// select bank 1 for the $0000 window
+        write(cartridge, 0x8000, 0b10000);// 4Kb CHR mode
+        write(cartridge, 0xA000, 1);      // select bank 1 for the $0000 window
 
         cartridge.chr_write(0x0000, 0x77);
 
