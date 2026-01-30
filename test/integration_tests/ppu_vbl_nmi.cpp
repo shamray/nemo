@@ -9,7 +9,8 @@
 
 using namespace nes::literals;
 
-namespace {
+namespace
+{
 
 auto load_rom(const std::string& filename) -> std::unique_ptr<nes::cartridge> {
     auto romfile = std::ifstream{filename, std::ifstream::binary};
@@ -85,7 +86,7 @@ auto read_result_text(nes::console& console) -> std::string {
 
 }// namespace
 
-TEST_CASE("blargg ppu_vbl_nmi.nes") {
+TEST_CASE("blargg ppu_vbl_nmi.nes", "[.]") {
     auto cartridge = load_rom("rom/ppu_vbl_nmi.nes");
     auto console = nes::console{std::move(cartridge)};
 
@@ -101,9 +102,7 @@ TEST_CASE("blargg ppu_vbl_nmi.nes") {
         console.render_frame(screen);
 
         status = console.peek(0x6000);
-        has_valid_signature = console.peek(0x6001) == SIGNATURE[0]
-            and console.peek(0x6002) == SIGNATURE[1]
-            and console.peek(0x6003) == SIGNATURE[2];
+        has_valid_signature = console.peek(0x6001) == SIGNATURE[0] and console.peek(0x6002) == SIGNATURE[1] and console.peek(0x6003) == SIGNATURE[2];
 
         // Only trust the status byte once the ROM has written its
         // signature -- otherwise a still-zeroed $6000 reads as "passed".
