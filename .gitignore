@@ -1,8 +1,11 @@
 ﻿.idea
 .vs
+.vscode
 CMakeSettings.json
 
 out
 cmake-build-*
 
 rom
+build
+doc
