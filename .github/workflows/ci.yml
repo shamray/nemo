@@ -24,7 +24,7 @@ jobs:
           cmake --build build --config ${{ matrix.build-config }}
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: bin-windows-${{ matrix.build-config }}
           path: |
@@ -41,7 +41,7 @@ jobs:
       fail-fast: false
     runs-on: windows-latest
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: bin-windows-${{ matrix.build-config }}
 
@@ -82,7 +82,7 @@ jobs:
 
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: bin-linux-${{ matrix.build-config }}-${{ matrix.compiler }}
           path: |
