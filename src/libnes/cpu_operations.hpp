@@ -7,7 +7,7 @@ namespace nes
 
 inline namespace literals
 {
-constexpr auto operator"" _i(unsigned long long x) { return static_cast<std::uint8_t>(x); }
+constexpr auto operator""_i(unsigned long long x) { return static_cast<std::uint8_t>(x); }
 }
 
 inline namespace details

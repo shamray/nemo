@@ -400,10 +400,10 @@ private:
     };
 
     // $2001 PPUMASK
-    [[nodiscard]] constexpr auto show_background() const noexcept { return (mask & 0x08) != 0; }
-    [[nodiscard]] constexpr auto show_sprites() const noexcept { return (mask & 0x10) != 0; }
-    [[nodiscard]] constexpr auto show_background_leftmost() const noexcept { return (mask & 0x02) != 0; }
-    [[nodiscard]] constexpr auto show_sprites_leftmost() const noexcept { return (mask & 0x04) != 0; }
+    [[nodiscard]] constexpr auto show_background() const noexcept -> bool { return (mask & 0x08) != 0; }
+    [[nodiscard]] constexpr auto show_sprites() const noexcept -> bool { return (mask & 0x10) != 0; }
+    [[nodiscard]] constexpr auto show_background_leftmost() const noexcept -> bool { return (mask & 0x02) != 0; }
+    [[nodiscard]] constexpr auto show_sprites_leftmost() const noexcept -> bool { return (mask & 0x04) != 0; }
 
 private:
     crt_scan scan_{SCANLINE_DOTS, VISIBLE_SCANLINES, POST_RENDER_SCANLINES, VERTICAL_BLANK_SCANLINES};
