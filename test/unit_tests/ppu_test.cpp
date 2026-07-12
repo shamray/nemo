@@ -446,6 +446,17 @@ TEST_CASE("PPU") {
 
                     CHECK(screen.pixels.at(nes::point{15, 0}) == RASPBERRY);
                 }
+                SECTION("252 pixels (negative scroll stays in the same nametable)") {
+                    write(0x2005, ppu, 0, 252);
+                    tick(ppu, screen, 242 * 341);// Wait one frame
+
+                    // Coarse Y 30/31 shows the attribute rows as garbage
+                    // tiles, then wraps to row 0 of the SAME nametable --
+                    // hardware never flips NT on this path (TMNT title).
+                    // NT0 row 0 lands on screen line 4; the probe pixel
+                    // sits on tile row 1, hence line 5.
+                    CHECK(screen.pixels.at(nes::point{15, 5}) == RASPBERRY);
+                }
             }
         }
 

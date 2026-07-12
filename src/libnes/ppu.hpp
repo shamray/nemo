@@ -133,7 +133,14 @@ public:
         auto tile_y = (y + active_scroll_y()) / 8;
         auto nametable_index_y = render_nametable_y_;
 
-        if (tile_y >= 30) {// wrap nametable while scrolling vertically
+        if (active_scroll_y() / 8 >= 30) {
+            // "negative scroll" (coarse Y 30/31): the attribute rows show as
+            // garbage tiles, then coarse Y wraps 31->0 into the SAME
+            // nametable - hardware never flips NT on this path (see
+            // tile_cursor::step_pixel_down)
+            if (tile_y >= 32)
+                tile_y -= 32;
+        } else if (tile_y >= 30) {// wrap nametable while scrolling vertically
             tile_y -= 30;
             nametable_index_y ^= 1;
         }
